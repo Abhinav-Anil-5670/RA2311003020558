@@ -193,3 +193,54 @@ To protect the primary database and improve user experience, we must implement a
 ### Strategy 2: Server-Sent Events (SSE) / WebSockets
 * **Pros:** Zero polling. The database is only queried once upon initial connection.
 * **Cons:** Maintaining persistent connections for 50,000 concurrent students requires careful load balancing and specialized infrastructure to handle open file descriptors.
+
+***
+
+# Stage 5: System Reliability & Fault Tolerance
+
+## Shortcomings of the Proposed Implementation
+1. **Synchronous & Blocking:** Iterating through 50,000 students sequentially is extremely slow. If `send_email` takes just 200ms per API call, this loop will take ~2.7 hours to complete. The HTTP request will timeout long before it finishes.
+2. **Lack of Fault Tolerance:** If the loop crashes on student #25,000, the remaining 25,000 students get nothing.
+3. **Coupled Failures:** If the 3rd-party Email API goes down and throws an error, the code never reaches `save_to_db` or `push_to_app`. A failure in one external service breaks the entire system.
+
+## Handling the "Failed for 200 students" Scenario
+Because the current pseudocode lacks a dead-letter queue or transaction logging, fixing the 200 failures is a nightmare. You would have to manually write a script to cross-reference the HR roster against the database to figure out exactly who was skipped, and then manually re-trigger those specific emails. 
+
+## Redesign for Reliability & Speed
+To make this reliable and fast, we must decouple the process using an **Asynchronous Message Queue** (like RabbitMQ, Kafka, or AWS SQS) and Background Workers. 
+
+The initial API call should simply accept the payload, bulk insert the records into the database (so we have an immediate permanent record), and push messages into a queue. Separate worker nodes will consume that queue independently.
+
+## Should Saving to DB and Sending Email Happen Together?
+**No, they should be decoupled.** 
+Writing to our own database is an internal, highly reliable, and fast operation. Sending an email relies on an external 3rd-party service (like AWS SES or SendGrid) which is prone to rate limits, network latency, and outages. They have completely different failure domains. We should always secure the data in our DB first, and handle the unreliable email sending asynchronously.
+
+## Revised Pseudocode
+```python
+# 1. Main API Handler (Fast Response)
+function notify_all(student_ids: array, message: string):
+    # Perform a single bulk insert (Highly efficient)
+    bulk_save_to_db(student_ids, message) 
+    
+    # Push tasks to an asynchronous message broker
+    for student_id in student_ids:
+        message_queue.publish(
+            queue_name="delivery_queue", 
+            payload={ "student_id": student_id, "message": message }
+        )
+        
+    return "202 Accepted: Notifications are processing in the background"
+
+# 2. Background Worker (Scalable & Fault Tolerant)
+# Multiple instances of this worker run independently
+function worker_process_delivery(payload):
+    try:
+        # Push to app via SSE (Fast)
+        push_to_app(payload.student_id, payload.message)
+        
+        # Send Email (Slow/Unreliable)
+        send_email(payload.student_id, payload.message)
+        
+    except ExternalAPIError as e:
+        # If email fails, push it to a retry queue with exponential backoff
+        message_queue.retry_later(payload, attempt_count += 1)
