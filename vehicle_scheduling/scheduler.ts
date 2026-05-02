@@ -26,7 +26,7 @@ async function getDepots(): Promise<Depot[]> {
         const response = await fetch(`${BASE_URL}/depots`, { headers });
         const data: any = await response.json();
         if (!response.ok) {
-            console.error("❌ DEPOT API ERROR:", data);
+            console.error("DEPOT API ERROR:", data);
             return [];
         }
         await Log("backend", "info", "service", "Successfully fetched depots data.");
@@ -43,7 +43,7 @@ async function getVehicles(): Promise<Vehicle[]> {
         const response = await fetch(`${BASE_URL}/vehicles`, { headers });
         const data: any = await response.json();
         if (!response.ok) {
-            console.error("❌ DEPOT API ERROR:", data);
+            console.error("DEPOT API ERROR:", data);
             return [];
         }
         await Log("backend", "info", "service", "Successfully fetched vehicles data.");

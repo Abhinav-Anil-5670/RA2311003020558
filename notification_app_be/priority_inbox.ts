@@ -31,7 +31,7 @@ async function fetchNotifications(): Promise<Notification[]> {
         const data: any = await response.json();
 
         if (!response.ok) {
-            console.error("❌ NOTIFICATION API ERROR:", data);
+            console.error(" NOTIFICATION API ERROR:", data);
             return [];
         }
 
@@ -76,7 +76,7 @@ async function generateInbox() {
     // Get Top 10 Priority Notifications
     const top10Inbox = getPriorityInbox(notifications, 10);
 
-    console.log("🔔 --- PRIORITY INBOX (TOP 10) --- 🔔\n");
+    console.log("--- PRIORITY INBOX (TOP 10) --- \n");
     top10Inbox.forEach((notif, index) => {
         console.log(`[${index + 1}] TYPE: ${notif.Type.toUpperCase()} | TIME: ${notif.Timestamp}`);
         console.log(`    MSG: ${notif.Message}`);
