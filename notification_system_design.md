@@ -146,3 +146,50 @@ UPDATE notifications
 SET is_read = true 
 WHERE student_id = '12345' AND is_read = false;
 ```
+
+***
+
+# Stage 3: Query Optimization
+
+## Analyzing the Slow Query
+**The Query:**
+`SELECT * FROM notifications WHERE studentID = 1042 AND isRead = false ORDER BY createdAt DESC;`
+
+* **Is it accurate?** Yes, the query is functionally accurate and will return the correct unread notifications.
+* **Why is it slow?** With 5,000,000 records, the database engine is likely performing a "Full Table Scan" (or inefficient index scan if only `studentID` is indexed). It has to manually check every row to see if `isRead` is false and then sort the results in memory.
+* **What to change:** I would add a **Composite B-Tree Index** on `(studentID, isRead, createdAt)`. 
+* **Computation Cost:** By adding the composite index, the time complexity drops from O(N) (scanning 5 million rows) to O(log N) (navigating the B-tree). The database can jump directly to the exact student, instantly filter by the boolean, and fetch the pre-sorted results.
+
+## Evaluating "Index Everything"
+Adding an index to *every* column is **terrible advice**. 
+* **Why it fails:** While indexes speed up READ operations, they heavily penalize WRITE operations (INSERT, UPDATE, DELETE). Every time a new notification is created or marked as read, the database would have to update multiple B-Trees. Furthermore, indexing every column causes massive database bloat, consuming unnecessary disk space and memory. Indexes should be applied strategically based on query patterns, not blindly.
+
+## Target Query: Recent Placement Notifications
+Write a query to find all students who got a placement notification in the last 7 days:
+```sql
+SELECT DISTINCT student_id 
+FROM notifications 
+WHERE notification_type = 'Placement' 
+AND created_at >= NOW() - INTERVAL '7 days'; 
+```
+
+# Stage 4: High-Load Read Optimization
+### The Problem
+Fetching notifications (or even just the unread count) synchronously from a relational database on every single page load for 50,000 students will immediately exhaust database connection pools and cause CPU bottlenecks.
+
+### The Solution: Distributed Caching
+To protect the primary database and improve user experience, we must implement an in-memory caching layer using Redis.
+
+### Implementation Strategy:
+* **Cache the Unread Count:** Store the unread count as a simple Key-Value pair in Redis (e.g., user:{id}:unread_count). On page load, the frontend hits an API that reads from Redis (sub-millisecond response) instead of querying PostgreSQL.
+* **Cache Invalidation:** When a new notification is generated, the backend increments the Redis counter. When a user reads a notification, the backend decrements it.
+* **Event-Driven UI:** As established in Stage 1, use Server-Sent Events (SSE) to push the new unread count to the client in real-time, eliminating the need for the frontend to request data on page load entirely.
+
+## Tradeoffs
+### Strategy 1: Read-Through Redis Caching
+* **Pros:** Drastically reduces DB load; sub-millisecond read times; highly scalable.
+* **Cons:** Introduces "Cache Invalidation" complexity (the hardest problem in computer science). If the server crashes between updating the DB and updating Redis, users might see stale data (e.g., phantom unread badges).
+
+### Strategy 2: Server-Sent Events (SSE) / WebSockets
+* **Pros:** Zero polling. The database is only queried once upon initial connection.
+* **Cons:** Maintaining persistent connections for 50,000 concurrent students requires careful load balancing and specialized infrastructure to handle open file descriptors.
