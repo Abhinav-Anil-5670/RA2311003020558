@@ -244,3 +244,21 @@ function worker_process_delivery(payload):
     except ExternalAPIError as e:
         # If email fails, push it to a retry queue with exponential backoff
         message_queue.retry_later(payload, attempt_count += 1)
+```
+
+***
+
+# Stage 6: Priority Inbox Implementation
+
+## Algorithm Approach
+To determine the "Top N" most important notifications, I implemented a custom sorting algorithm in TypeScript. 
+
+1. **Weight Assignment:** I assigned numerical weights to the notification types using a Hash Map/Dictionary: `Placement` (3), `Result` (2), and `Event` (1). 
+2. **Compound Sorting:** The algorithm utilizes the native Array `.sort()` method with a custom comparator. 
+   * It first compares the assigned weight of two notifications. The higher weight bubbles to the top.
+   * If two notifications have the exact same weight (e.g., two Placement notifications), it falls back to a Recency check. It parses the ISO timestamps into Unix epochs and sorts them in descending order (newest first).
+3. **Slicing:** Finally, it uses `.slice(0, n)` to return only the requested number of top notifications, ensuring memory efficiency if the frontend only needs 10 items.
+
+## Scalability Note
+While doing this in memory on the application level works for a small payload, doing this at scale (millions of unread notifications) would require shifting this logic to the database layer (e.g., an SQL `ORDER BY weight DESC, created_at DESC LIMIT 10`) or maintaining a Sorted Set in Redis to ensure the Priority Inbox fetches instantly without overwhelming application memory.
+
